@@ -113,7 +113,6 @@ export default class UnorganizedComponent extends Component<{}> {
 
     addFolder = () =>
     {
-        alert("Test");
         var folderValue = this.state.folderValue;
         firebase.database().ref("folder").once('value').then(function(snapshot) {
             
