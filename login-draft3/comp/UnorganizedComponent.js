@@ -161,6 +161,10 @@ export default class UnorganizedComponent extends Component<{}> {
 
             firebase.database().ref(folderDbRefValue).set(snapshotArray);
         });
+
+        this.setState({
+            selectedParentFolder: null
+        });
         this.state.changeWindows = null;
     }
 
