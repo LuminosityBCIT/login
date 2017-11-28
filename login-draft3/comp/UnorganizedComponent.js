@@ -12,6 +12,11 @@ import BookMarkRowComponent from './BookMarkRowComponent';
     
 import CheckBox from 'react-native-checkbox';
 
+//
+//  https://www.npmjs.com/package/react-native-material-dropdown
+//
+import { Dropdown } from 'react-native-material-dropdown';
+
 const { UIManager } = NativeModules;
 
 var firebaseConfig = {
@@ -111,10 +116,29 @@ export default class UnorganizedComponent extends Component<{}> {
         this.state.changeWindows = null;
     }
 
+    generateRandomString = () =>
+    {
+        //
+        //  Same code used in extension to generate random string
+        //
+          var text = "";
+          var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+          for (var i = 0; i < 20; i++)
+            text += possible.charAt(Math.floor(Math.random() * possible.length));
+
+          return text;
+    }
+
     addFolder = () =>
     {
+        var user = firebase.auth().currentUser;
+        var folderDbRefValue = "users/"+user.uid+"/folders";
         var folderValue = this.state.folderValue;
-        firebase.database().ref("folder").once('value').then(function(snapshot) {
+        var folderKey = this.generateRandomString();
+        var parentFolder = this.state.selectedParentFolder;
+
+        firebase.database().ref(folderDbRefValue).once('value').then(function(snapshot) {
             
             var snapshotArray = [];
 
@@ -126,9 +150,16 @@ export default class UnorganizedComponent extends Component<{}> {
 
             var newFolder = {};
             newFolder["folder_name"] = folderValue;
+            newFolder["folder_key"] = folderKey;
+
+            if (parentFolder)
+            {
+                newFolder["parent_key"] = parentFolder['folder_key'];
+            }
+
             snapshotArray.unshift(newFolder);
 
-            firebase.database().ref("folder").set(snapshotArray);
+            firebase.database().ref(folderDbRefValue).set(snapshotArray);
         });
         this.state.changeWindows = null;
     }
@@ -158,6 +189,22 @@ export default class UnorganizedComponent extends Component<{}> {
         });
     }
 
+    onParentFolderSelectionChange = (text) =>
+    {
+        var selectedFolder = null;
+
+        this.state.folderLists.forEach(function(folder) {
+            if (folder['folder_name'] == text)
+            {
+                selectedFolder = folder;
+            }
+        });
+
+        this.setState({
+            selectedParentFolder : selectedFolder
+        });
+    }
+
     folderSelection = (key, index, name, snapshot) =>{
             
         // folderKeyRef = database.ref("folder/"+key);
@@ -172,25 +219,34 @@ export default class UnorganizedComponent extends Component<{}> {
         // folderNameDisplay.innerHTML = name;  
     }
 
+
     removeFolder = (key, index) => {
-        // var filter = this.state.bookmarkLists.filter((obj, i)=>{
+
+        //
+        //  Do the same thing as what I did for adding a new bookmark
+        //  except that I don't add a new bookmark, and skip the index that I am deleting.
+        //
+        var user = firebase.auth().currentUser;
+        var folderDbRefValue = "users/"+user.uid+"/folders";
+        var folderValue = this.state.folderValue;
+        firebase.database().ref(folderDbRefValue).once('value').then(function(snapshot) {
             
-        //     return (obj.folderkey == key)
-        // });
-        
-        // for(var i in filter){
-        //     console.log(filter[i]);
-        //     firebase.database().ref("bookmarks/"+filter[i].key).remove();
-        // }
-        // firebaseApp.database().ref("folder/"+key).remove();
-        
-        // var folderArr = this.state.folderLists;
-        // folderArr.splice(index, 1);
-        
-        // //console.log(folderArr);
-        // this.setState({
-        //     folderLists: folderArr
-        // })    
+            var snapshotArray = [];
+            var i = 0;
+            snapshot.forEach(function(childSnapshot) {
+
+                if (i != index)
+                {
+                    var item = childSnapshot.val();
+                    item.key = childSnapshot.key;
+                    snapshotArray.push(item);
+                }
+                i++;
+            });
+
+            firebase.database().ref(folderDbRefValue).set(snapshotArray);
+        });
+        this.state.changeWindows = null;
     }
     
     constructor(props) {
@@ -198,7 +254,8 @@ export default class UnorganizedComponent extends Component<{}> {
         
         const ds = new ListView.DataSource({rowHasChanged: (r1, r2) => r1 !== r2});
         this.state = {
-            folderLists: [],            
+            folderLists: [],  
+            selectedParentFolder: null,          
             titleValue:"",
             urlValue:"",
             folderValue:"",
@@ -223,6 +280,8 @@ export default class UnorganizedComponent extends Component<{}> {
             changeWindows:1,
             fbDatabase: null
         };
+
+        this.generateRandomString = this.generateRandomString.bind();
     }
     
     componentWillMount() {
@@ -261,23 +320,77 @@ export default class UnorganizedComponent extends Component<{}> {
             });
         });
 
-        var firebaseRef = firebase.database().ref('folder');
+        var folderDbRefValue = "users/"+user.uid+"/folders";
+        var firebaseRef = firebase.database().ref(folderDbRefValue);
         firebaseRef.on('value', (snapshot) => {
 
             var folderArr = [];
             
+            var parentFolders = [];
+            var childFolders = [];
+            var combinedOrderedFolder = [];
+
             snapshot.forEach(function(childSnapshot) {
 
-                var folder_name = snapshot.child("folder_name").val();
+                var folder_name = childSnapshot.child("folder_name").val();
+                var folder_key = childSnapshot.child("folder_key").val();
+                var parent_key = childSnapshot.child("parent_key").val();
+
                 var obj = {
                     folder_name: folder_name,
+                    folder_key: folder_key,
+                    parent_key: parent_key,
+                    value: folder_name,
                     key: snapshot.key
-                }
-                folderArr.push(childSnapshot);
+                };
+
+                folderArr.push(obj);
             });
 
+            //
+            //  split parent, and child folders
+            //
+            folderArr.forEach(function(thisFolder) {
+
+                //
+                //  if parent key exists, save it in child folders
+                //
+                if (thisFolder["parent_key"])
+                {
+                    childFolders.push(thisFolder);
+                }
+                //
+                //  if parent key does not exist, save it in parent folders
+                //
+                else {
+                    parentFolders.push(thisFolder);
+                }
+            });
+
+            //
+            //  loop through parent folder array to save them in order with child
+            //
+            var testText = "";
+            parentFolders.forEach(function(thisFolder) {
+
+                combinedOrderedFolder.push(thisFolder);
+
+                testText = testText + " // " + thisFolder['value'];
+
+                childFolders.forEach(function(child) {
+
+                    if (child['parent_key'] == thisFolder['folder_key'])
+                    {
+                        combinedOrderedFolder.push(child);
+                testText = testText + " // " + child['value'];
+                    }
+                });
+            });
+
+            // alert(JSON.stringify(parentFolders));
+
             this.setState({
-                folderLists: folderArr
+                folderLists: combinedOrderedFolder
             });
         });
     }
@@ -303,6 +416,9 @@ render() {
         if(this.state.changeWindows == 1){
               windowDisplay = null
         }else if(this.state.changeWindows == 2){
+            //
+            //  Create folder
+            //
              windowDisplay = (
               <View
  style={styles.containerAdd}>
@@ -328,21 +444,14 @@ render() {
                      </View>   
                 </View>
 
-                <View style={styles.addMarkPic2}>  
-                     <Image style={styles.addChoose}
-                      source={require('../src/img/Choose.png')}/>
-                    <CheckBox
-                     label='Main Folder'
-                     /> 
+                <View style={styles.folderDropDown}>  
+                      <Dropdown
+                        label='Choose parent folder'
+                        data={this.state.folderLists}
+                        onChangeText={this.onParentFolderSelectionChange}
+                      />
                 </View>
 
-                <View style={styles.addMarkPic2}> 
-                     <Text style={styles.subFolde}></Text>      
-                     <CheckBox 
-                      label='Sub Folder'
-                      />
-                 </View>
-            
                  <View
                   style={styles.containerDivButs}>                      
                         <TouchableHighlight
@@ -366,6 +475,10 @@ render() {
 </View>
               ) 
         }else if(this.state.changeWindows == 3){
+
+            //
+            //  Add bookmark
+            //
              windowDisplay = (
 
             <View style={styles.containerAdd}>
@@ -424,14 +537,22 @@ render() {
 
    var showFolder = this.state.folderLists.map((obj, i)=>{
     
+    var imgElement = null;
+
+    if (obj["parent_key"])
+    {
+        imgElement = <View style={styles.folderImgView}><Image style={styles.subFolderImg} source={require('../imgs_unorganized/subFolder.png')} /></View>;
+    }
+    else {
+        imgElement = <View style={styles.folderImgView}><Image style={styles.folderImg} source={require('../imgs_unorganized/folder.png')} /></View>;
+    }
         return (            
     <View style={styles.sidedivPic} key={i}>
-        <View style={styles.sidedivSubPic}>   
+        <View style={styles.sidedivSubPic}>  
+            {imgElement} 
             <TouchableHighlight
-            underlayColor={"#FFCC33"}
-            style={styles.bmfBut}
-            id="folderBtn" onPress={this.folderSelection.bind(this, obj.key, i, obj.folder_name)}>
-            <Text style={styles.folderText}>{obj.child("folder_name").val()} </Text>
+            id="folderBtn" onPress={this.folderSelection.bind(this, obj['key'], i, obj['folder_name'])}>
+            <Text >{obj["folder_name"]} </Text>
             </TouchableHighlight>
             <Button title={"X"}  onPress={this.removeFolder.bind(this, obj.key, i)}/>
          </View>                                      
@@ -603,6 +724,21 @@ butImg2:{
          width:32,
 },
     
+folderImgView : {
+    width: 40,
+    height: 30
+},
+
+folderImg : {
+    width: 31,
+    height: 23
+},
+
+subFolderImg : {
+    width: 27,
+    height: 15
+},
+
 butImg:{ 
          height:32,
          width:32,    
@@ -1005,6 +1141,10 @@ addMarkInp2: {
        borderRadius: 4,
         borderWidth: 2,
         borderColor: '#787878',
+},  
+
+folderDropDown: {
+       width: "80%"
 },     
 
 containerDivButs: {
